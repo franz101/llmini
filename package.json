@@ -11,7 +11,9 @@
 		"lint": "npx @biomejs/biome check --write"
 	},
 	"lint-staged": {
-		"*": ["npm run lint"]
+		"*": [
+			"npm run lint"
+		]
 	},
 	"dependencies": {
 		"@mantine/core": "^7.17.3",

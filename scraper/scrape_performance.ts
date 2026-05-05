@@ -146,25 +146,37 @@ const HEADERS = {
 };
 
 async function fetchChipBenchmarks(
-  chipFull: string
+  chipFull: string,
+  retries = 5
 ): Promise<BenchmarkResponse | null> {
   const url = `${BASE_URL}?chip_full=${encodeURIComponent(chipFull)}`;
-  console.log(`  → GET ${url}`);
-  try {
-    const res = await fetch(url, { headers: HEADERS });
-    if (!res.ok) {
-      console.error(`    ✗ HTTP ${res.status}: ${res.statusText}`);
-      return null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) {
+      const delay = Math.min(1000 * 2 ** attempt, 30000);
+      console.log(`    ⏳ Retry ${attempt}/${retries} in ${delay / 1000}s...`);
+      await new Promise((r) => setTimeout(r, delay));
     }
-    const data = (await res.json()) as BenchmarkResponse;
-    console.log(
-      `    ✓ ${data.total} entries, contexts: ${Object.keys(data.by_context).join(", ")}`
-    );
-    return data;
-  } catch (err) {
-    console.error(`    ✗ Error: ${err}`);
-    return null;
+    try {
+      const res = await fetch(url, { headers: HEADERS });
+      if (res.status === 429) {
+        console.error(`    ✗ HTTP 429 (rate limited), attempt ${attempt + 1}`);
+        continue;
+      }
+      if (!res.ok) {
+        console.error(`    ✗ HTTP ${res.status}: ${res.statusText}`);
+        return null;
+      }
+      const data = (await res.json()) as BenchmarkResponse;
+      console.log(
+        `    ✓ ${data.total} entries, contexts: ${Object.keys(data.by_context).join(", ")}`
+      );
+      return data;
+    } catch (err) {
+      console.error(`    ✗ Error: ${err}`);
+      if (attempt === retries) return null;
+    }
   }
+  return null;
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────
@@ -202,9 +214,9 @@ async function main() {
       contexts,
     });
 
-    // Polite delay between requests
+    // Rate-limit: 2s between requests to avoid 429
     if (i < CHIP_VARIANTS.length - 1) {
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
 
