@@ -6,7 +6,10 @@
   "scripts": {
     "scrape": "bun run scrape.ts",
     "scrape:idealo": "bun run scrape_idealo.ts",
-    "scrape:idealo:py": "python3 scrape_idealo.py"
+    "scrape:idealo:py": "python3 scrape_idealo.py",
+    "scrape:performance": "bun run scrape_performance.ts",
+    "scrape:benchmarks": "bun run scrape_benchmarks.ts",
+    "scrape:llmstats": "bun run scrape_llmstats.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
@@ -18,6 +21,7 @@
     "cheerio": "^1.2.0",
     "playwright": "^1.59.1",
     "playwright-extra": "^4.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "socks-proxy-agent": "^10.0.0"
   }
 }
