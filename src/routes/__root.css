@@ -1,0 +1,7 @@
+@import "tailwind-preset-mantine";
+
+@layer base {
+	html {
+		scroll-behavior: smooth;
+	}
+}

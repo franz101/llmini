@@ -1,0 +1,34 @@
+{
+	"files.watcherExclude": {
+		"**/routeTree.gen.ts": true
+	},
+	"search.exclude": {
+		"**/routeTree.gen.ts": true
+	},
+	"files.readonlyInclude": {
+		"**/routeTree.gen.ts": true
+	},
+	"cssVariables.lookupFiles": [
+		"**/*.css",
+		"**/*.scss",
+		"**/*.sass",
+		"**/*.less",
+		"node_modules/@mantine/core/styles.css"
+	],
+	"explorer.fileNesting.patterns": {
+		"package.json": "package-lock.json",
+		"*.ts": "$(capture).*.ts",
+		"vite.config.ts": "vitest.config.ts"
+	},
+	"editor.formatOnSave": true,
+	"editor.defaultFormatter": "biomejs.biome",
+	"[typescript]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[jsonc]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[typescriptreact]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	}
+}
