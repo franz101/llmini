@@ -4,7 +4,6 @@ import {
 	Container,
 	Group,
 	Select,
-	Table,
 	Text,
 	TextInput,
 	Title,
@@ -70,61 +69,104 @@ const data = leaderboardData as { models: Model[]; scraped_at: string }
 
 type SortKey = keyof Model | ''
 
-const COLUMNS: { key: keyof Model; label: string; tooltip?: string; format?: 'score' | 'price' | 'tokens' | 'latency' | 'speed' }[] = [
-	{ key: 'name', label: 'Model' },
-	{ key: 'organization', label: 'Org' },
-	{ key: 'license', label: 'License' },
+// Column definitions with explicit score types
+type ScoreFormat = 'index' | 'benchmark' | 'elo'
+type ColFormat = ScoreFormat | 'price' | 'tokens' | 'speed' | 'text'
+
+const COLUMNS: { key: keyof Model; label: string; tooltip?: string; format: ColFormat }[] = [
+	{ key: 'name', label: 'Model', format: 'text' },
+	{ key: 'organization', label: 'Org', format: 'text' },
+	{ key: 'license', label: 'License', format: 'text' },
 	{ key: 'context', label: 'Context', format: 'tokens' },
 	{ key: 'input_price', label: 'In $/M', format: 'price' },
 	{ key: 'output_price', label: 'Out $/M', format: 'price' },
-	{ key: 'throughput', label: 'Speed', format: 'speed', tooltip: 'Tokens/sec' },
-	{ key: 'index_reasoning', label: 'Reason', format: 'score' },
-	{ key: 'index_math', label: 'Math', format: 'score' },
-	{ key: 'index_code', label: 'Code', format: 'score' },
-	{ key: 'coding_arena_score', label: 'Arena', format: 'score', tooltip: 'Coding Arena Elo' },
-	{ key: 'gpqa_score', label: 'GPQA', format: 'score' },
-	{ key: 'hle_score', label: 'HLE', format: 'score' },
-	{ key: 'aime_2025_score', label: 'AIME', format: 'score' },
-	{ key: 'swe_bench_verified_score', label: 'SWE-b', format: 'score' },
-	{ key: 'mmmlu_score', label: 'MMMLU', format: 'score' },
-	{ key: 'mmmu_score', label: 'MMMU', format: 'score' },
-	{ key: 'arc_agi_v2_score', label: 'ARC', format: 'score' },
-	{ key: 'browsecomp_score', label: 'Browse', format: 'score' },
-	{ key: 'frontiermath_score', label: 'FMath', format: 'score' },
-	{ key: 'scicode_score', label: 'SciCode', format: 'score' },
-	{ key: 'release_date', label: 'Released' },
+	{ key: 'throughput', label: 't/s', format: 'speed', tooltip: 'Tokens/sec' },
+	{ key: 'index_reasoning', label: 'Reason', format: 'index' },
+	{ key: 'index_math', label: 'Math', format: 'index' },
+	{ key: 'index_code', label: 'Code', format: 'index' },
+	{ key: 'coding_arena_score', label: 'Arena', format: 'elo', tooltip: 'Coding Arena Elo' },
+	{ key: 'gpqa_score', label: 'GPQA', format: 'benchmark' },
+	{ key: 'hle_score', label: 'HLE', format: 'benchmark' },
+	{ key: 'aime_2025_score', label: 'AIME', format: 'benchmark' },
+	{ key: 'swe_bench_verified_score', label: 'SWE-b', format: 'benchmark' },
+	{ key: 'mmmlu_score', label: 'MMMLU', format: 'benchmark' },
+	{ key: 'mmmu_score', label: 'MMMU', format: 'benchmark' },
+	{ key: 'arc_agi_v2_score', label: 'ARC', format: 'benchmark' },
+	{ key: 'browsecomp_score', label: 'Browse', format: 'benchmark' },
+	{ key: 'frontiermath_score', label: 'FMath', format: 'benchmark' },
+	{ key: 'scicode_score', label: 'SciCode', format: 'benchmark' },
+	{ key: 'release_date', label: 'Released', format: 'text' },
 	{ key: 'params', label: 'Params', format: 'tokens' },
 ]
 
-function formatValue(val: unknown, format?: string): string {
+// ─── Formatting ────────────────────────────────────────────────────────
+
+function formatCell(val: unknown, format: ColFormat): string {
 	if (val === null || val === undefined) return '–'
-	if (format === 'score') {
-		const n = Number(val)
-		if (n >= 10) return n.toFixed(0)
-		if (n >= 1) return (n * 100).toFixed(1) + '%'
-		return n.toFixed(2)
+	const n = Number(val)
+
+	switch (format) {
+		case 'index':
+			return isNaN(n) ? '–' : n.toFixed(0)
+		case 'benchmark':
+			return isNaN(n) ? '–' : (n * 100).toFixed(0) + '%'
+		case 'elo':
+			return isNaN(n) ? '–' : n.toFixed(0)
+		case 'price':
+			return '$' + n.toFixed(2)
+		case 'tokens': {
+			if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'B'
+			if (n >= 1_000_000) return (n / 1_000_000).toFixed(0) + 'M'
+			if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K'
+			return String(n)
+		}
+		case 'speed':
+			return isNaN(n) ? '–' : n.toFixed(0) + ' t/s'
+		default:
+			return String(val)
 	}
-	if (format === 'price') return '$' + Number(val).toFixed(2)
-	if (format === 'tokens') {
-		const n = Number(val)
-		if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'B'
-		if (n >= 1_000_000) return (n / 1_000_000).toFixed(0) + 'M'
-		if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K'
-		return String(n)
-	}
-	if (format === 'latency') return Number(val).toFixed(0) + 'ms'
-	if (format === 'speed') return Number(val).toFixed(0) + ' t/s'
-	return String(val)
 }
 
-function scoreColor(val: number | null, format?: string): string {
-	if (val === null || format !== 'score') return ''
-	if (val >= 80) return 'text-emerald-600 font-semibold'
-	if (val >= 60) return 'text-emerald-500'
-	if (val >= 40) return 'text-amber-500'
-	if (val >= 20) return 'text-orange-500'
-	return 'text-red-400'
+/**
+ * Returns a cell background highlight class based on the score value.
+ * Index scores: 0-100, benchmark scores: 0-1, elo: 600-2000+
+ * Background highlight is much more readable than colored text.
+ */
+function scoreHighlight(val: number | null, format: ColFormat): string {
+	if (val === null) return ''
+
+	let pct = 0
+	if (format === 'index') pct = val / 100
+	else if (format === 'benchmark') pct = val
+	else if (format === 'elo') pct = Math.max(0, Math.min(1, (val - 600) / 1400))
+
+	if (pct >= 0.9) return 'bg-emerald-100 text-emerald-900'
+	if (pct >= 0.8) return 'bg-emerald-50 text-emerald-800'
+	if (pct >= 0.7) return 'bg-lime-50 text-lime-800'
+	if (pct >= 0.6) return 'bg-yellow-50 text-yellow-800'
+	if (pct >= 0.4) return 'bg-amber-50 text-amber-800'
+	if (pct >= 0.2) return 'bg-orange-50 text-orange-800'
+	return 'bg-red-50 text-red-800'
 }
+
+function licenseLabel(license: string | null): string {
+	if (!license) return '–'
+	const l = license.toLowerCase()
+	if (l.includes('apache')) return 'Apache'
+	if (l.includes('mit')) return 'MIT'
+	if (l.includes('proprietary')) return 'Prop'
+	if (l.includes('open') || l.includes('cc-') || l.includes('llama')) return 'Open'
+	return license.slice(0, 12)
+}
+
+function licenseColor(license: string | null): string {
+	if (!license) return 'gray'
+	const l = license.toLowerCase()
+	if (l === 'proprietary') return 'orange'
+	return 'green'
+}
+
+// ─── Page ──────────────────────────────────────────────────────────────
 
 export const Route = createFileRoute('/leaderboard')({
 	component: LeaderboardPage,
@@ -166,9 +208,7 @@ function LeaderboardPage() {
 			if (licenseFilter === 'proprietary')
 				list = list.filter((m) => m.license === 'proprietary')
 			else if (licenseFilter === 'open')
-				list = list.filter(
-					(m) => m.license && m.license !== 'proprietary'
-				)
+				list = list.filter((m) => m.license && m.license !== 'proprietary')
 		}
 
 		if (sortKey) {
@@ -188,12 +228,8 @@ function LeaderboardPage() {
 	}, [search, orgFilter, licenseFilter, sortKey, sortDir])
 
 	function handleSort(key: keyof Model) {
-		if (sortKey === key) {
-			setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-		} else {
-			setSortKey(key)
-			setSortDir('desc')
-		}
+		if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+		else { setSortKey(key); setSortDir('desc') }
 	}
 
 	const SortIcon = sortDir === 'asc' ? IconArrowUp : IconArrowDown
@@ -205,21 +241,15 @@ function LeaderboardPage() {
 				<div className="mb-6">
 					<Group justify="space-between" align="end">
 						<div>
-							<Title
-								order={1}
-								className="text-2xl font-extrabold tracking-tight mb-1"
-							>
+							<Title order={1} className="text-2xl font-extrabold tracking-tight mb-1">
 								LLM Leaderboard
 							</Title>
 							<Text c="dimmed" size="sm">
-								{data.models.length} models · benchmark scores from
-								llm-stats.com · updated{' '}
-								{new Date(data.scraped_at).toLocaleDateString()}
+								{data.models.length} models · benchmark scores from llm-stats.com
+								{' · '}updated {new Date(data.scraped_at).toLocaleDateString()}
 							</Text>
 						</div>
-						<Text size="xs" c="dimmed">
-							Click column header to sort
-						</Text>
+						<Text size="xs" c="dimmed">Click column header to sort</Text>
 					</Group>
 				</div>
 
@@ -230,8 +260,7 @@ function LeaderboardPage() {
 						leftSection={<IconSearch size={14} />}
 						value={search}
 						onChange={(e) => setSearch(e.currentTarget.value)}
-						w={260}
-						size="sm"
+						w={260} size="sm"
 					/>
 					<Select
 						placeholder="Organization"
@@ -241,9 +270,7 @@ function LeaderboardPage() {
 							{ value: 'all', label: `All orgs (${orgs.length})` },
 							...orgs.map((o) => ({ value: o, label: o })),
 						]}
-						w={200}
-						size="sm"
-						searchable
+						w={200} size="sm" searchable
 					/>
 					<Select
 						placeholder="License"
@@ -254,123 +281,118 @@ function LeaderboardPage() {
 							{ value: 'proprietary', label: 'Proprietary' },
 							{ value: 'open', label: 'Open-source' },
 						]}
-						w={160}
-						size="sm"
+						w={160} size="sm"
 					/>
-					<Text size="xs" c="dimmed">
-						{filtered.length} models shown
-					</Text>
+					<Badge variant="light" color="gray" size="lg" className="font-normal">
+						{filtered.length} models
+					</Badge>
 				</Group>
 
 				{/* Table */}
 				<div className="bg-white rounded-lg border border-gray-200 overflow-x-auto shadow-sm">
-					<Table
-						striped
-						highlightOnHover
-						className="text-xs"
-						style={{ minWidth: 1600 }}
-					>
-						<Table.Thead className="bg-gray-50">
-							<Table.Tr>
+					<table className="w-full text-sm" style={{ minWidth: 1700 }}>
+						<thead>
+							<tr className="border-b-2 border-gray-200 bg-gray-100">
 								{COLUMNS.map((col) => (
-									<Table.Th
+									<th
 										key={col.key}
-										className="cursor-pointer select-none whitespace-nowrap py-2 px-2 hover:bg-gray-100 transition-colors"
+										className="cursor-pointer select-none whitespace-nowrap py-2.5 px-3 text-left hover:bg-gray-200 transition-colors"
 										onClick={() => handleSort(col.key)}
 									>
-										<Tooltip
-											label={col.tooltip}
-											disabled={!col.tooltip}
-										>
-											<Group gap={4} wrap="nowrap">
-												<span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+										<Tooltip label={col.tooltip} disabled={!col.tooltip}>
+											<div className="flex items-center gap-1">
+												<span className="text-[13px] font-semibold text-gray-700 uppercase tracking-tight">
 													{col.label}
 												</span>
 												{sortKey === col.key && (
-													<SortIcon
-														size={10}
-														className="text-gray-400"
-													/>
+													<SortIcon size={12} className="text-gray-500" />
 												)}
-											</Group>
+											</div>
 										</Tooltip>
-									</Table.Th>
+									</th>
 								))}
-							</Table.Tr>
-						</Table.Thead>
-						<Table.Tbody>
-							{filtered.map((m) => (
-								<Table.Tr key={m.model_id} className="hover:bg-blue-50/30">
+							</tr>
+						</thead>
+						<tbody>
+							{filtered.map((m, i) => (
+								<tr
+									key={m.model_id}
+									className={`border-b border-gray-100 hover:bg-blue-50/50 transition-colors ${
+										i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+									}`}
+								>
 									{COLUMNS.map((col) => {
 										const val = m[col.key]
-										const formatted = formatValue(val, col.format)
-										const colorClass = scoreColor(
-											typeof val === 'number' ? val : null,
-											col.format
-										)
+										const formatted = formatCell(val, col.format)
+										const highlight =
+											col.format === 'index' ||
+											col.format === 'benchmark' ||
+											col.format === 'elo'
+												? scoreHighlight(
+														typeof val === 'number' ? val : null,
+														col.format
+													)
+												: ''
+
 										return (
-											<Table.Td
+											<td
 												key={col.key}
-												className={`whitespace-nowrap py-1.5 px-2 ${
+												className={`whitespace-nowrap py-2 px-3 ${
 													col.key === 'name'
-														? 'font-medium text-gray-900 max-w-[180px] truncate'
-														: 'text-gray-600'
-												} ${colorClass}`}
+														? 'font-semibold text-gray-900 max-w-[200px] truncate'
+														: col.format === 'text'
+															? 'text-gray-600'
+															: 'text-gray-800 text-center'
+												} ${highlight}`}
 											>
 												{col.key === 'name' ? (
 													<a
 														href={`https://llm-stats.com/models/${m.model_id}`}
 														target="_blank"
 														rel="noopener noreferrer"
-														className="text-gray-900 hover:text-blue-600 no-underline transition-colors"
+														className="text-gray-900 hover:text-blue-600 no-underline"
 													>
 														{String(val || '')}
 													</a>
 												) : col.key === 'license' ? (
 													<Badge
-														size="xs"
+														size="sm"
 														variant="light"
-														color={
-															val === 'proprietary'
-																? 'orange'
-																: 'green'
-														}
-														className="font-normal"
+														color={licenseColor(val as string | null)}
+														className="font-medium"
 													>
-														{val === 'proprietary'
-															? 'Prop'
-															: String(val || '–')}
+														{licenseLabel(val as string | null)}
 													</Badge>
 												) : col.key === 'organization' ? (
-													<span className="text-gray-500 text-[11px]">
-														{String(val || '–').slice(0, 18)}
+													<span className="text-gray-500 text-xs">
+														{String(val || '–').slice(0, 20)}
 													</span>
 												) : (
 													formatted
 												)}
-											</Table.Td>
+											</td>
 										)
 									})}
-								</Table.Tr>
+								</tr>
 							))}
-						</Table.Tbody>
-					</Table>
+						</tbody>
+					</table>
+
+					{filtered.length === 0 && (
+						<div className="text-center py-16">
+							<Text c="dimmed">No models match your filters.</Text>
+						</div>
+					)}
 				</div>
 
 				{/* Footer */}
 				<div className="mt-6 pt-4 border-t border-gray-200 text-center">
 					<Text size="xs" c="dimmed">
 						Data from{' '}
-						<a
-							href="https://llm-stats.com"
-							target="_blank"
-							rel="noopener noreferrer"
-							className="text-blue-500 hover:underline"
-						>
+						<a href="https://llm-stats.com" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
 							llm-stats.com
 						</a>
-						. Scores are normalized 0–100. Click model names for
-						details.
+						. Index scores: 0–100. Benchmarks: 0–100%. Arena: Elo. Click model names for details.
 					</Text>
 				</div>
 			</Container>

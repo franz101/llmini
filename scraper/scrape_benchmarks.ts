@@ -28,6 +28,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import * as cheerio from "cheerio";
 import { SocksProxyAgent } from "socks-proxy-agent";
 
@@ -105,6 +106,9 @@ function parseArgs(): Partial<ScraperConfig> & { resume?: boolean } {
 
 const BASE = "https://omlx.ai/benchmarks";
 const TOR_SOCKS = "socks5://127.0.0.1:9050";
+const TOR_CONTROL = 9051;
+const TOR_COOKIE = "/opt/homebrew/var/lib/tor/control_auth_cookie";
+const TOR_PASSWORD = process.env.TOR_PASSWORD || "";  // set if using HashedControlPassword
 
 const HEADERS: Record<string, string> = {
   "User-Agent":
@@ -125,6 +129,84 @@ const HEADERS: Record<string, string> = {
   "Upgrade-Insecure-Requests": "1",
 };
 
+// ── Tor identity rotation ────────────────────────────────────────────────
+
+class TorController {
+  private authenticated = false;
+
+  /** Send SIGNAL NEWNYM to get a fresh Tor circuit (new exit IP) */
+  async newIdentity(): Promise<boolean> {
+    try {
+      const socket = createConnection({ host: "127.0.0.1", port: TOR_CONTROL });
+      await new Promise<void>((resolve, reject) => {
+        socket.once("connect", resolve);
+        socket.once("error", reject);
+        setTimeout(() => reject(new Error("connect timeout")), 3000);
+      });
+
+      const buf: Buffer[] = [];
+      socket.on("data", (d) => buf.push(d));
+
+      const readUntil = (marker: string, timeout = 3000): Promise<string> =>
+        new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error("read timeout")), timeout);
+          const check = () => {
+            const data = Buffer.concat(buf).toString();
+            if (data.includes(marker)) {
+              clearTimeout(timer);
+              resolve(data);
+            }
+          };
+          socket.on("data", () => check());
+          check();
+        });
+
+      // Read banner
+      await readUntil("250");
+
+      if (!this.authenticated) {
+        // Check if authentication is required
+        socket.write("PROTOCOLINFO\r\n");
+        const info = await readUntil("250");
+
+        if (info.includes("AUTH METHODS=NULL")) {
+          // No auth needed
+        } else if (info.includes("AUTH METHODS=COOKIE")) {
+          if (existsSync(TOR_COOKIE)) {
+            const cookie = readFileSync(TOR_COOKIE);
+            const hex = cookie.toString("hex");
+            socket.write(`AUTHENTICATE ${hex}\r\n`);
+            await readUntil("250");
+          }
+        } else if (info.includes("AUTH METHODS=HASHEDPASSWORD")) {
+          if (TOR_PASSWORD) {
+            socket.write(`AUTHENTICATE "${TOR_PASSWORD}"\r\n`);
+            await readUntil("250");
+          }
+        }
+        this.authenticated = true;
+      }
+
+      // Request new identity
+      socket.write("SIGNAL NEWNYM\r\n");
+      await readUntil("250");
+
+      // Wait for circuit to be ready
+      socket.write("GETINFO status/circuit-established\r\n");
+      await readUntil("250");
+
+      socket.write("QUIT\r\n");
+      socket.end();
+
+      // Small delay for new circuit to stabilize
+      await new Promise((r) => setTimeout(r, 500));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+}
+
 // ── Proxy pool ───────────────────────────────────────────────────────────
 
 class ProxyPool {
@@ -132,12 +214,16 @@ class ProxyPool {
   private cooldowns = new Map<string, number>();
   private index = 0;
   private torAgent: SocksProxyAgent | null = null;
+  private torCtrl: TorController | null = null;
+  private useTor: boolean;
 
   constructor(opts: { useTor?: boolean; useFreeProxies?: boolean; proxyFile?: string }) {
+    this.useTor = opts.useTor ?? false;
     if (opts.useTor) {
       this.proxies = [TOR_SOCKS];
       this.torAgent = new SocksProxyAgent(TOR_SOCKS);
       this.torAgent.timeout = 15000;
+      this.torCtrl = new TorController();
     }
     // Free proxies and file-based are loaded async via loadFreeProxies()
     if (opts.proxyFile && existsSync(opts.proxyFile)) {
@@ -229,6 +315,13 @@ class ProxyPool {
   }
 
   /** Mark a proxy for cooldown (milliseconds) */
+  /** Rotate Tor identity for a fresh IP */
+  async rotateTor(): Promise<void> {
+    if (this.torCtrl) {
+      await this.torCtrl.newIdentity();
+    }
+  }
+
   cooldown(proxy: string, ms: number): void {
     this.cooldowns.set(proxy, Date.now() + ms);
   }
@@ -268,19 +361,23 @@ async function fetchPage(
   const url = `${BASE}?page=${page}`;
   let lastErr: unknown = null;
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
+  // Tor 429s get extra attempts since each is a fresh IP after rotation
+  const isTor = proxies.size > 0;
+  const maxAttempts = isTor ? retries + 40 : retries;
+
+  for (let attempt = 0; attempt <= maxAttempts; attempt++) {
     const proxy = proxies.getNext();
 
     if (attempt > 0) {
-      const delay = Math.min(2000 * 2 ** attempt, 30000);
-      if (attempt > 1) {
+      const delay = Math.min(2000 * 2 ** Math.min(attempt, 5), 30000);
+      if (attempt <= 3 || attempt % 10 === 0) {
         const via = proxy
           ? proxy === TOR_SOCKS
             ? "Tor"
             : proxy.replace(/\/\/.*@/, "//***@")
           : "direct";
         process.stderr.write(
-          `  ⚠ Retry page ${page} #${attempt}/${retries} via ${via}, wait ${delay}ms\n`
+          `  ⚠ Retry page ${page} #${attempt}/${maxAttempts} via ${via}, wait ${delay}ms\n`
         );
       }
       await new Promise((r) => setTimeout(r, delay));
@@ -303,18 +400,22 @@ async function fetchPage(
       const res = await fetch(url, fetchOpts);
 
       if (res.status === 429) {
-        if (proxy) {
-          // Rate-limited via this proxy — cooldown it
-          const cdMs = proxy === TOR_SOCKS ? 30000 : 120000;
-          proxies.cooldown(proxy, cdMs);
+        if (proxy === TOR_SOCKS) {
+          process.stderr.write(`  ⚠ 429 Tor (page ${page}), rotating + retry #${attempt}\n`);
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        } else if (proxy) {
+          proxies.cooldown(proxy, 120000);
           process.stderr.write(
-            `  ⚠ 429 on ${proxy === TOR_SOCKS ? "Tor" : proxy.replace(/\/\/.*@/, "//***@")} (page ${page}), cooldown ${cdMs / 1000}s [${proxies.cooldownCount()}/${proxies.size} on cd]\n`
+            `  ⚠ 429 on ${proxy.replace(/\/\/.*@/, "//***@")} (page ${page}), cooldown 120s\n`
           );
+          await new Promise((r) => setTimeout(r, 10000));
+          continue;
         } else {
           process.stderr.write(`  ⚠ 429 on page ${page} (direct), backing off\n`);
+          await new Promise((r) => setTimeout(r, 10000));
+          continue;
         }
-        await new Promise((r) => setTimeout(r, 10000));
-        continue;
       }
 
       if (!res.ok) {
@@ -329,14 +430,14 @@ async function fetchPage(
       if (proxy && err?.code === "ECONNREFUSED") {
         proxies.cooldown(proxy, 60000);
       }
-      if (attempt === retries) {
+      if (attempt >= maxAttempts) {
         console.error(`  ✗ Failed page ${page}: ${err?.message || err}`);
         return null;
       }
     }
   }
 
-  console.error(`  ✗ Failed page ${page} after ${retries} retries: ${lastErr}`);
+  console.error(`  ✗ Failed page ${page} after ${maxAttempts} attempts: ${lastErr}`);
   return null;
 }
 
@@ -410,6 +511,8 @@ async function scrapeBatch(
     const results = await Promise.allSettled(
       chunk.map(async (page) => {
         const html = await fetchPage(page, proxies);
+        // Rotate Tor identity after each fetch for a fresh IP
+        if (cfg.useTor) await proxies.rotateTor();
         if (!html) return [] as BenchmarkRow[];
         return parseRows(html, cfg.appleOnly);
       })
@@ -427,7 +530,7 @@ async function scrapeBatch(
     );
 
     if (done < pages.length) {
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, cfg.useTor ? 200 : 2000));
     }
   }
 

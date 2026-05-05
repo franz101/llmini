@@ -22,3 +22,6 @@ node_modules
 /playwright/.cache/
 
 .pi/
+
+# Scraped debug HTML dumps (may contain third-party secrets)
+scraper/debug*.html

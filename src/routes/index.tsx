@@ -55,7 +55,7 @@ function Nav() {
 						href="/products"
 						className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors no-underline"
 					>
-						Browse Models
+						Machines
 					</a>
 					<a
 						href="/leaderboard"
