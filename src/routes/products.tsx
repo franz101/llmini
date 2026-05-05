@@ -10,16 +10,17 @@ import {
 	SimpleGrid,
 	Text,
 	Title,
-	ThemeIcon,
 } from '@mantine/core'
 import {
 	IconCpu,
 	IconServer,
 	IconDeviceDesktop,
 	IconDatabase,
+	IconExternalLink,
 } from '@tabler/icons-react'
 import { useMemo, useState } from 'react'
-import products from '~/data/products.json'
+import productsNbb from '~/data/products.json'
+import productsIdealo from '~/data/products_idealo.json'
 
 interface Product {
 	name: string
@@ -35,27 +36,62 @@ interface Product {
 	os: string
 	formFactor: string
 	connectivity: string[]
-	other: string[]
 	specs: string[]
+	source: string
 }
 
-const typedProducts = products as Product[]
+// Merge both sources, deduplicate by normalized name
+const nbbProducts: Product[] = (productsNbb as any[]).map((p: any) => ({
+	...p,
+	availability: p.availability || 'Unknown',
+	source: 'NBB',
+	connectivity: p.connectivity || [],
+	specs: p.specs || [],
+}))
+
+const idealoProducts: Product[] = (productsIdealo as any[]).map((p: any) => ({
+	...p,
+	availability: p.offerCount > 0 ? 'In stock' : 'Unknown',
+	source: 'Idealo',
+	connectivity: p.connectivity || [],
+	specs: p.specs || [],
+}))
+
+// Dedupe: prefer idealo for matching names (better parsed specs)
+const seenNames = new Set<string>()
+const allProducts: Product[] = []
+for (const p of [...idealoProducts, ...nbbProducts]) {
+	const key = p.name.toLowerCase().replace(/\s+/g, ' ').trim()
+	if (!seenNames.has(key)) {
+		seenNames.add(key)
+		allProducts.push(p)
+	}
+}
 
 export const Route = createFileRoute('/products')({
 	component: ProductsPage,
 })
 
 function ProductsPage() {
-	const [typeFilter, setTypeFilter] = useState<string>('all')
+	const [typeFilter, setTypeFilter] = useState<string>('mac-mini')
 	const [sortBy, setSortBy] = useState<string>('price-desc')
+	const [sourceFilter, setSourceFilter] = useState<string>('all')
 
 	const filtered = useMemo(() => {
-		let list = [...typedProducts]
+		let list = [...allProducts]
 
 		if (typeFilter === 'mac-mini') {
-			list = list.filter((p) => p.name.includes('Mac mini'))
+			list = list.filter((p) => p.name.toLowerCase().includes('mac mini'))
 		} else if (typeFilter === 'imac') {
-			list = list.filter((p) => p.name.includes('iMac'))
+			list = list.filter((p) => p.name.toLowerCase().includes('imac'))
+		} else if (typeFilter === 'mac-studio') {
+			list = list.filter((p) => p.name.toLowerCase().includes('mac studio'))
+		}
+
+		if (sourceFilter === 'nbb') {
+			list = list.filter((p) => p.source === 'NBB')
+		} else if (sourceFilter === 'idealo') {
+			list = list.filter((p) => p.source === 'Idealo')
 		}
 
 		switch (sortBy) {
@@ -78,22 +114,33 @@ function ProductsPage() {
 		}
 
 		return list
-	}, [typeFilter, sortBy])
+	}, [typeFilter, sortBy, sourceFilter])
 
-	const macMiniCount = typedProducts.filter((p) => p.name.includes('Mac mini')).length
-	const iMacCount = typedProducts.filter((p) => p.name.includes('iMac')).length
+	const macMiniCount = allProducts.filter((p) =>
+		p.name.toLowerCase().includes('mac mini')
+	).length
+	const iMacCount = allProducts.filter((p) =>
+		p.name.toLowerCase().includes('imac')
+	).length
+	const macStudioCount = allProducts.filter((p) =>
+		p.name.toLowerCase().includes('mac studio')
+	).length
 
 	return (
 		<div className="min-h-screen bg-gray-50">
 			<Container size="xl" className="py-12">
 				{/* Header */}
 				<div className="mb-8">
-					<Title order={1} className="text-3xl font-extrabold tracking-tight mb-2">
-						Apple Products — 32‑64 GB RAM
+					<Title
+						order={1}
+						className="text-3xl font-extrabold tracking-tight mb-2"
+					>
+						Apple Silicon Macs — 32‑64 GB RAM
 					</Title>
 					<Text c="dimmed" size="sm">
-						Live prices from notebooksbilliger.de · Sorted by highest price
-						first · {macMiniCount} Mac mini + {iMacCount} iMac configurations
+						Live prices from notebooksbilliger.de & idealo.de ·{' '}
+						{macMiniCount} Mac mini + {iMacCount} iMac + {macStudioCount} Mac
+						Studio configurations
 					</Text>
 				</div>
 
@@ -102,13 +149,31 @@ function ProductsPage() {
 					<Select
 						label="Product type"
 						value={typeFilter}
-						onChange={(v) => setTypeFilter(v || 'all')}
+						onChange={(v) => setTypeFilter(v || 'mac-mini')}
 						data={[
-							{ value: 'all', label: `All (${typedProducts.length})` },
-							{ value: 'mac-mini', label: `Mac mini (${macMiniCount})` },
+							{ value: 'all', label: `All (${allProducts.length})` },
+							{
+								value: 'mac-mini',
+								label: `Mac mini (${macMiniCount})`,
+							},
+							{
+								value: 'mac-studio',
+								label: `Mac Studio (${macStudioCount})`,
+							},
 							{ value: 'imac', label: `iMac (${iMacCount})` },
 						]}
-						w={200}
+						w={220}
+					/>
+					<Select
+						label="Source"
+						value={sourceFilter}
+						onChange={(v) => setSourceFilter(v || 'all')}
+						data={[
+							{ value: 'all', label: 'All sources' },
+							{ value: 'nbb', label: 'NBB' },
+							{ value: 'idealo', label: 'Idealo' },
+						]}
+						w={160}
 					/>
 					<Select
 						label="Sort by"
@@ -154,18 +219,26 @@ function ProductsPage() {
 							<div className="mt-4">
 								<Group justify="space-between" className="mb-2">
 									<Badge
-										color={p.availability === 'In stock' ? 'green' : 'orange'}
+										color={
+											p.availability === 'In stock'
+												? 'green'
+												: 'orange'
+										}
 										variant="light"
 										size="sm"
 									>
 										{p.availability}
 									</Badge>
 									<Badge color="gray" variant="outline" size="sm">
-										{p.name.includes('iMac') ? 'iMac' : 'Mac mini'}
+										{p.source}
 									</Badge>
 								</Group>
 
-								<Title order={3} size="h6" className="font-semibold mb-3 line-clamp-2">
+								<Title
+									order={3}
+									size="h6"
+									className="font-semibold mb-3 line-clamp-2"
+								>
 									{p.name}
 								</Title>
 
@@ -173,7 +246,10 @@ function ProductsPage() {
 								<div className="space-y-1.5 mb-4 text-sm">
 									{p.cpu && (
 										<div className="flex items-center gap-2 text-gray-600">
-											<IconCpu size={14} className="text-gray-400 flex-shrink-0" />
+											<IconCpu
+												size={14}
+												className="text-gray-400 flex-shrink-0"
+											/>
 											<Text size="xs" c="dimmed" truncate>
 												{p.cpu}
 											</Text>
@@ -181,7 +257,10 @@ function ProductsPage() {
 									)}
 									{p.gpu && (
 										<div className="flex items-center gap-2 text-gray-600">
-											<IconServer size={14} className="text-gray-400 flex-shrink-0" />
+											<IconServer
+												size={14}
+												className="text-gray-400 flex-shrink-0"
+											/>
 											<Text size="xs" c="dimmed" truncate>
 												{p.gpu}
 											</Text>
@@ -189,7 +268,10 @@ function ProductsPage() {
 									)}
 									{p.ram && (
 										<div className="flex items-center gap-2 text-gray-600">
-											<IconDeviceDesktop size={14} className="text-gray-400 flex-shrink-0" />
+											<IconDeviceDesktop
+												size={14}
+												className="text-gray-400 flex-shrink-0"
+											/>
 											<Text size="xs" c="dimmed">
 												{p.ram}
 											</Text>
@@ -197,7 +279,10 @@ function ProductsPage() {
 									)}
 									{p.storage && (
 										<div className="flex items-center gap-2 text-gray-600">
-											<IconDatabase size={14} className="text-gray-400 flex-shrink-0" />
+											<IconDatabase
+												size={14}
+												className="text-gray-400 flex-shrink-0"
+											/>
 											<Text size="xs" c="dimmed" truncate>
 												{p.storage}
 											</Text>
@@ -205,27 +290,13 @@ function ProductsPage() {
 									)}
 								</div>
 
-								{/* Connectivity chips */}
-								{p.connectivity.length > 0 && (
-									<Group gap={4} className="mb-4">
-										{p.connectivity.slice(0, 4).map((c) => (
-											<Badge
-												key={c}
-												variant="light"
-												color="gray"
-												size="xs"
-												className="font-normal"
-											>
-												{c.slice(0, 25)}
-											</Badge>
-										))}
-									</Group>
-								)}
-
 								{/* Price + CTA */}
 								<div className="flex items-end justify-between pt-3 border-t border-gray-100">
 									<div>
-										<Text size="xl" className="font-extrabold tracking-tight">
+										<Text
+											size="xl"
+											className="font-extrabold tracking-tight"
+										>
 											{p.priceFormatted}
 										</Text>
 										<Text size="xs" c="dimmed">
@@ -241,8 +312,9 @@ function ProductsPage() {
 										color="dark"
 										size="sm"
 										radius="md"
+										rightSection={<IconExternalLink size={14} />}
 									>
-										View →
+										View
 									</Button>
 								</div>
 							</div>
@@ -250,11 +322,21 @@ function ProductsPage() {
 					))}
 				</SimpleGrid>
 
+				{/* Empty state */}
+				{filtered.length === 0 && (
+					<div className="text-center py-20">
+						<Text c="dimmed" size="lg">
+							No products match your filters.
+						</Text>
+					</div>
+				)}
+
 				{/* Footer note */}
 				<div className="mt-12 pt-6 border-t border-gray-200 text-center">
 					<Text size="xs" c="dimmed">
-						Product data scraped from notebooksbilliger.de. Prices and
-						availability may vary. Click "View" to see the current listing.
+						Product data scraped from notebooksbilliger.de & idealo.de.
+						Prices and availability may vary. Click "View" to see the
+						current listing.
 					</Text>
 				</div>
 			</Container>

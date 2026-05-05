@@ -6,6 +6,8 @@
 	"scripts": {
 		"setup": "rm -rf node_modules && npm i && husky",
 		"dev": "vinxi dev --host",
+		"tmux": "./tmux.sh",
+		"tmux:kill": "./tmux.sh kill",
 		"build": "vinxi build",
 		"start": "npm run build && npx wrangler pages dev ",
 		"lint": "npx @biomejs/biome check --write"

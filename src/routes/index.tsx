@@ -52,6 +52,18 @@ function Nav() {
 				</a>
 				<div className="flex items-center gap-4">
 					<a
+						href="/products"
+						className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors no-underline"
+					>
+						Browse Models
+					</a>
+					<a
+						href="/leaderboard"
+						className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors no-underline"
+					>
+						Leaderboard
+					</a>
+					<a
 						href="#faq"
 						className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors no-underline"
 					>
