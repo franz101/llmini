@@ -1,0 +1,23 @@
+{
+  "name": "scraper",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "scrape": "bun run scrape.ts",
+    "scrape:idealo": "bun run scrape_idealo.ts",
+    "scrape:idealo:py": "python3 scrape_idealo.py"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "playwright": "^1.59.1",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
